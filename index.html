@@ -1,0 +1,1334 @@
+<title>台股當沖試算</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* 版面: 左欄輸入 (開倉 / 費率 / 風險), 右欄結果 (摘要 → 回本 → 漲跌停 → 分批平倉 → 逐檔); 盤中模式只留一欄大字 */
+  :root {
+    --bg: #f3f4ef;
+    --panel: #ffffff;
+    --ink: #1c2024;
+    --muted: #6b7178;
+    --line: #d9dcd4;
+    --line-strong: #b8bdb3;
+    --accent: #1e3a5f;
+    --accent-ink: #ffffff;
+    --up: #c8102e;      /* 台股習慣：紅漲 */
+    --up-soft: #fdeef0;
+    --down: #138a4f;    /* 綠跌 */
+    --down-soft: #e9f6ee;
+    --center: #e8eef7;
+    --field: #f8f8f5;
+    --warn: #9a6700;
+    --warn-soft: #fff6dd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #15181b; --panel: #1e2226; --ink: #eceeea; --muted: #9aa1a8;
+      --line: #30363c; --line-strong: #474f57; --accent: #8fb3e6; --accent-ink: #10161f;
+      --up: #ff6b7a; --up-soft: #3a1f25; --down: #4fd48e; --down-soft: #1b3328;
+      --center: #243246; --field: #171a1e; --warn: #f0c060; --warn-soft: #3a3020;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #15181b; --panel: #1e2226; --ink: #eceeea; --muted: #9aa1a8;
+    --line: #30363c; --line-strong: #474f57; --accent: #8fb3e6; --accent-ink: #10161f;
+    --up: #ff6b7a; --up-soft: #3a1f25; --down: #4fd48e; --down-soft: #1b3328;
+    --center: #243246; --field: #171a1e; --warn: #f0c060; --warn-soft: #3a3020;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.1rem; }
+  .top > div { min-width: 0; }
+  h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 .25rem; letter-spacing: .01em; }
+  .sub { color: var(--muted); margin: 0; font-size: .9rem; }
+  .layout { display: grid; grid-template-columns: 330px 1fr; gap: 1rem; align-items: start; }
+  .layout > * { min-width: 0; }
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; }
+  .panel h2 { font-size: .95rem; font-weight: 700; margin: 0 0 .75rem; }
+  aside .panel + .panel { margin-top: 1rem; }
+
+  .seg { display: flex; border: 1px solid var(--line-strong); border-radius: 5px; overflow: hidden; margin-bottom: .6rem; }
+  .seg button {
+    flex: 1; padding: .45rem .3rem; border: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: .88rem; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  label.f { display: block; font-size: .82rem; color: var(--muted); margin: .55rem 0 .2rem; }
+  .row { display: flex; gap: .4rem; align-items: center; }
+  input[type="number"], select {
+    width: 100%; padding: .42rem .5rem; border: 1px solid var(--line-strong); border-radius: 4px;
+    background: var(--field); color: var(--ink); font: inherit; font-size: .95rem; min-width: 0;
+  }
+  input[type="number"]:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .unit { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+  .hint { font-size: .78rem; color: var(--muted); margin: .3rem 0 0; }
+
+  .legs { border-top: 1px solid var(--line); margin-top: .6rem; padding-top: .6rem; }
+  .leg { display: grid; grid-template-columns: 1fr 1fr auto; gap: .4rem; align-items: center; margin-bottom: .4rem; }
+  .leg .x {
+    border: 1px solid var(--line-strong); background: transparent; color: var(--muted); border-radius: 4px;
+    width: 30px; height: 32px; cursor: pointer; font: inherit;
+  }
+  .leg .x:disabled { opacity: .35; cursor: default; }
+  .leg-head { display: grid; grid-template-columns: 1fr 1fr 30px; gap: .4rem; font-size: .78rem; color: var(--muted); margin-bottom: .25rem; }
+  .btn {
+    border: 1px solid var(--line-strong); background: transparent; color: var(--ink); border-radius: 4px;
+    padding: .4rem .7rem; font: inherit; font-size: .85rem; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.quiet { color: var(--muted); border-color: var(--line); }
+  .btn.solid { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+  .discounts { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .35rem; }
+  .discounts .btn { padding: .25rem .55rem; font-size: .8rem; }
+  .discounts .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 500; }
+  .rates { font-size: .82rem; color: var(--muted); margin-top: .6rem; line-height: 1.7; }
+  .rates b { color: var(--ink); font-weight: 500; }
+
+  /* 摘要 */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem 1rem; margin-bottom: .9rem; }
+  .stat .k { font-size: .78rem; color: var(--muted); }
+  .stat .v { font-size: 1.15rem; font-weight: 700; }
+  .stat .v small { font-size: .78rem; font-weight: 400; color: var(--muted); margin-left: .2rem; }
+
+  /* 回本 */
+  .be-banner { display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem .9rem; border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    border-radius: 6px; padding: .7rem 1rem; margin-bottom: 1rem; background: var(--field); }
+  .be-banner .big { font-size: 1.6rem; font-weight: 700; }
+  .be-banner .big em { font-style: normal; color: var(--accent); }
+  .be-banner .d { color: var(--muted); font-size: .85rem; }
+
+  .compare { border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1rem; background: var(--field); overflow-x: auto; }
+  .compare h3, .sec h3 { margin: 0 0 .4rem; font-size: .9rem; font-weight: 700; }
+  .compare table, .mini { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  .compare td, .compare th, .mini td, .mini th { padding: .25rem .3rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .compare th, .mini th { font-weight: 500; color: var(--muted); }
+  .compare td:first-child, .compare th:first-child, .mini td:first-child, .mini th:first-child { text-align: left; }
+  .compare tr:last-child td, .mini tr:last-child td { border-bottom: 0; }
+  .compare .note { font-size: .8rem; color: var(--muted); margin: .5rem 0 0; white-space: normal; }
+  .diff-zero { color: var(--muted); }
+
+  /* 漲跌停 */
+  .limits { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .4rem; }
+  @media (max-width: 520px) { .limits { grid-template-columns: 1fr; } }
+  .limit { border: 1px solid var(--line); border-radius: 6px; padding: .7rem .85rem; }
+  .limit.up { border-left: 4px solid var(--up); }
+  .limit.down { border-left: 4px solid var(--down); }
+  .limit .t { font-size: .82rem; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: .4rem; }
+  .limit .t button { font-size: .75rem; padding: .1rem .4rem; }
+  .limit .pl { font-size: 1.25rem; font-weight: 700; margin-top: .2rem; }
+  .limit .d { font-size: .8rem; color: var(--muted); }
+  .limit input { margin-top: .35rem; }
+  .limit-src { font-size: .78rem; color: var(--muted); margin: 0 0 1rem; }
+  .limit-src.warn { color: var(--warn); }
+
+  /* 區塊 */
+  .sec { border-top: 1px solid var(--line); padding-top: .9rem; margin-top: .4rem; margin-bottom: 1rem; }
+  .callout { border-radius: 6px; padding: .55rem .75rem; font-size: .85rem; margin-top: .5rem; }
+  .callout.warn { background: var(--warn-soft); color: var(--warn); }
+  .result-line { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin-top: .6rem; font-size: .88rem; }
+  .result-line b { font-size: 1.05rem; }
+
+  /* 逐檔表 */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; max-height: 70vh; overflow-y: auto; }
+  table.ticks { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 560px; }
+  table.ticks th, table.ticks td { padding: .38rem .55rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.ticks th { position: sticky; top: 0; background: var(--panel); font-weight: 500; color: var(--muted); z-index: 1; }
+  table.ticks th:first-child, table.ticks td:first-child { text-align: left; }
+  table.ticks tr.center td { background: var(--center); font-weight: 700; }
+  table.ticks tr.be td:first-child::after { content: " ●"; color: var(--accent); }
+  table.ticks tr.lim-up td { background: var(--up-soft); }
+  table.ticks tr.lim-down td { background: var(--down-soft); }
+  .pos { color: var(--up); }
+  .neg { color: var(--down); }
+  .expand { display: flex; justify-content: space-between; margin: .5rem 0; }
+  .foot { font-size: .8rem; color: var(--muted); margin-top: .75rem; }
+  .foot p { margin: .25rem 0; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; }
+  .toolbar h2 { margin: 0; }
+
+  /* 盤中模式 */
+  .quick { max-width: 560px; margin: 0 auto; }
+  .qgrid { display: grid; grid-template-columns: 1.4fr 1fr; gap: .6rem; }
+  .qgrid label { font-size: .82rem; color: var(--muted); display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+  .qgrid input { font-size: 1.5rem; padding: .5rem .6rem; font-weight: 700; }
+  .qsteps { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; margin-top: .5rem; }
+  .qsteps .btn { padding: .55rem 0; font-size: .95rem; }
+  .qhead { text-align: center; margin: .9rem 0 .6rem; }
+  .qhead .big { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+  .qhead .big em { font-style: normal; color: var(--accent); }
+  .qhead .d { color: var(--muted); font-size: .9rem; }
+  table.qladder { width: 100%; border-collapse: collapse; font-size: 1.15rem; }
+  table.qladder td { padding: .55rem .6rem; border-bottom: 1px solid var(--line); text-align: right; }
+  table.qladder td:first-child { text-align: left; color: var(--muted); font-size: .85rem; }
+  table.qladder tr.center td { background: var(--center); font-weight: 700; }
+  table.qladder tr.be td { font-weight: 700; }
+  table.qladder tr.lim-up td { background: var(--up-soft); }
+  table.qladder tr.lim-down td { background: var(--down-soft); }
+  @media (prefers-reduced-motion: no-preference) { .seg button, .btn { transition: background-color .12s, border-color .12s; } }
+
+  /* 代號帶入: 資訊卡 + 當沖體檢 + 1 分 K */
+  input[type="text"] {
+    width: 100%; padding: .42rem .5rem; border: 1px solid var(--line-strong); border-radius: 4px;
+    background: var(--field); color: var(--ink); font: inherit; font-size: 1.05rem; min-width: 0; letter-spacing: .04em;
+  }
+  input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .code-row .btn { min-height: 36px; white-space: nowrap; }
+  .info-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; margin-top: .7rem; }
+  .info-head .nm { font-size: 1.1rem; font-weight: 700; }
+  .info-head .dt { font-size: .76rem; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 1fr; gap: .3rem; margin-top: .5rem; }
+  .kv div { display: flex; justify-content: space-between; gap: .4rem; border-bottom: 1px solid var(--line); padding-bottom: .2rem; font-size: .86rem; min-width: 0; }
+  .kv span:first-child { color: var(--muted); white-space: nowrap; }
+  .kv span:last-child { text-align: right; }
+  .kv .na { color: var(--muted); font-size: .78rem; }
+  .info-sec { margin-top: .9rem; }
+  .info-sec h3 { font-size: .86rem; margin: 0 0 .35rem; font-weight: 700; }
+  .kchart { width: 100%; height: 230px; display: block; border: 1px solid var(--line); border-radius: 4px; background: var(--field); }
+  .klegend { display: flex; gap: .8rem; flex-wrap: wrap; font-size: .76rem; color: var(--muted); margin-top: .3rem; }
+  .klegend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: .25rem; background: var(--accent); }
+
+  /* 代號列 + 分頁 (手機優先: 代號在最上面, 內容用分頁切, 不再全部疊在左欄) */
+  .lookup-bar { margin-bottom: .6rem; padding: .7rem .8rem; }
+  .lookup-bar .hint { margin-top: .35rem; }
+  .lookup-bar .code-row { max-width: 440px; }
+  .lookup-grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: .4rem 1.2rem; align-items: start; }
+  .data-meta { font-size: .8rem; color: var(--muted); line-height: 1.6; border-left: 1px solid var(--line); padding-left: 1rem; }
+  .data-meta b { color: var(--ink); font-weight: 500; }
+  @media (max-width: 820px) { .lookup-grid { grid-template-columns: 1fr; } .data-meta { border-left: 0; padding-left: 0; font-size: .76rem; } }
+  .code-sum { display: flex; flex-wrap: wrap; gap: .2rem .8rem; align-items: baseline; margin-top: .45rem; font-size: .88rem; }
+  .code-sum .nm { font-weight: 700; font-size: 1rem; }
+  .tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: .3rem; background: var(--bg); padding: .35rem 0; margin-bottom: .6rem; }
+  .tabs button { flex: 1; min-height: 42px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: .95rem; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tabpane.panel { max-width: 760px; margin: 0 auto; }
+  .tabpane[hidden], #fullView[hidden] { display: none !important; }
+  #tabInfo .info-head { margin-top: 0; }
+  @media (max-width: 820px) {
+    /* 試算頁: 交易設定 → 結果 → 依風險算張數 → 手續費 */
+    .layout { display: flex; flex-direction: column; align-items: stretch; gap: .8rem; }
+    .p-main { min-width: 0; }
+    .layout aside { display: contents; }
+    aside .panel + .panel { margin-top: 0; }
+    .p-trade { order: 1; } .p-main { order: 2; } .p-risk { order: 3; } .p-fee { order: 4; }
+    .wrap { padding: .8rem .75rem 2.5rem; }
+    .top .sub { display: none; }
+  }
+
+  /* 盤前作戰圖: 價位梯子 + 開盤情境 + 突破昨高低 (歷史統計) */
+  .pb-note { border-left: 3px solid var(--warn); background: var(--warn-soft); color: var(--ink); font-size: .78rem; padding: .45rem .6rem; border-radius: 4px; margin: .4rem 0 .6rem; }
+  .pb-lad { width: 100%; border-collapse: collapse; font-size: .84rem; }
+  .pb-lad td { padding: .28rem .3rem; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: right; }
+  .pb-lad td:first-child { text-align: left; border-left: 3px solid var(--line-strong); padding-left: .45rem; }
+  .pb-lad tr.u td:first-child { border-left-color: var(--up); }
+  .pb-lad tr.d td:first-child { border-left-color: var(--down); }
+  .pb-lad tr.base td { background: var(--center); font-weight: 700; }
+  .pb-lad tr.rnd td { color: var(--muted); }
+  .pb-open { display: flex; gap: .4rem; align-items: center; margin: .3rem 0 .4rem; }
+  .pb-open input { flex: 1; }
+  .pb-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
+  .pb-chips .btn { padding: .3rem .45rem; font-size: .78rem; min-height: 30px; }
+  .pb-chips .btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .pb-head { font-size: .9rem; margin: .2rem 0 .4rem; }
+  .pb-head b { font-size: 1rem; }
+  .pb-chart { width: 100%; display: block; border: 1px solid var(--line); border-radius: 4px; background: var(--field); }
+  .pb-list { margin: .4rem 0 0; padding: 0; list-style: none; font-size: .84rem; }
+  .pb-list li { display: flex; justify-content: space-between; gap: .5rem; border-bottom: 1px solid var(--line); padding: .2rem 0; }
+  .pb-list li span:first-child { color: var(--muted); }
+  .pb-all { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: .3rem; }
+  .pb-all th, .pb-all td { padding: .25rem .2rem; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  .pb-all th { color: var(--muted); font-weight: 500; }
+  .pb-all th:first-child, .pb-all td:first-child { text-align: left; }
+  .pb-all tr.on td { background: var(--center); font-weight: 700; }
+  .pb-all tr { cursor: pointer; }
+  .ref { color: var(--muted); }
+  .ok { color: var(--accent); font-weight: 700; }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>台股當沖試算</h1>
+      <p class="sub">多筆開倉、分批平倉、依風險算張數，看扣完 4 折手續費與證交稅之後每一檔的淨損益。設定會留在這個瀏覽器。</p>
+    </div>
+    <button class="btn solid" id="quickBtn">盤中模式</button>
+  </div>
+
+  <!-- 盤中模式: 只留進場價、張數、回本檔數、上下幾檔 -->
+  <section class="quick" id="quickView" hidden>
+    <div class="panel">
+      <div class="seg" id="qKind">
+        <button data-v="stock">個股</button>
+        <button data-v="etf">ETF</button>
+      </div>
+      <div class="seg" id="qDir">
+        <button data-v="long">做多</button>
+        <button data-v="short">做空</button>
+      </div>
+      <div class="qgrid">
+        <label for="qPrice"><span id="qPriceLabel">進場價</span><input type="number" id="qPrice" inputmode="decimal" step="0.01" min="0"></label>
+        <label for="qLots">張數<input type="number" id="qLots" inputmode="numeric" step="1" min="1"></label>
+      </div>
+      <div class="qsteps">
+        <button class="btn" data-q="-1">−1 檔</button>
+        <button class="btn" data-q="1">＋1 檔</button>
+        <button class="btn" data-ql="-1">−1 張</button>
+        <button class="btn" data-ql="1">＋1 張</button>
+      </div>
+      <div class="qhead" id="qHead"></div>
+      <table class="qladder"><tbody id="qLadder"></tbody></table>
+      <p class="hint" id="qNote"></p>
+      <div class="row" style="justify-content:space-between;margin-top:.8rem">
+        <button class="btn quiet" id="qToFull">帶到完整版</button>
+        <button class="btn" id="quickExit">回完整版</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="fullView">
+  <div class="panel lookup-bar" id="lookupPanel">
+    <div class="lookup-grid">
+    <div>
+    <div class="row code-row">
+      <input type="text" id="codeIn" autocomplete="off" list="codeList" placeholder="代號或名稱，例 2330、台積電" aria-label="股票代號或名稱">
+      <datalist id="codeList"></datalist>
+      <button class="btn solid" id="codeGo">帶入</button>
+    </div>
+    <div id="codeSum"></div>
+    <p class="hint" id="codeMsg">帶入收盤價當昨收、自動切個股 / ETF，並顯示這檔的作戰圖與盤後資料。</p>
+    </div>
+    <div class="data-meta" id="dataMeta">資料讀取中…</div>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="頁面">
+    <button role="tab" data-tab="calc">試算</button>
+    <button role="tab" data-tab="plan">作戰圖</button>
+    <button role="tab" data-tab="info">盤後資料</button>
+  </nav>
+  <section class="panel tabpane" id="tabPlan" role="tabpanel" hidden><div id="pbBox"><p class="hint">先在上面輸入代號。</p></div></section>
+  <section class="panel tabpane" id="tabInfo" role="tabpanel" hidden><div id="infoCard"><p class="hint">先在上面輸入代號。</p></div></section>
+  <div class="layout tabpane" id="tabCalc" role="tabpanel">
+    <aside>
+      <div class="panel p-trade">
+        <h2>交易設定</h2>
+        <div class="seg" id="segKind">
+          <button data-v="stock">個股當沖</button>
+          <button data-v="etf">ETF 當沖</button>
+        </div>
+        <div class="seg" id="segDir">
+          <button data-v="long">做多（先買後賣）</button>
+          <button data-v="short">做空（先賣後買）</button>
+        </div>
+        <label class="f" for="prevClose">昨收（算漲跌停用）</label>
+        <div class="row"><input type="number" id="prevClose" step="0.01" min="0" placeholder="沒填就用均價估"><span class="unit">元</span></div>
+
+        <div class="legs">
+          <div class="leg-head"><span id="legPriceLabel">買入價</span><span>張數</span><span></span></div>
+          <div id="legs"></div>
+          <div class="row">
+            <button class="btn" id="addLeg">＋ 再加一筆</button>
+            <button class="btn quiet" id="reset">↺ 重設</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel p-risk">
+        <h2>依風險算張數</h2>
+        <label class="f" for="riskBudget">這筆最多願意虧</label>
+        <div class="row"><input type="number" id="riskBudget" step="100" min="0"><span class="unit">元</span></div>
+        <div class="row" style="gap:.6rem">
+          <div style="flex:1;min-width:0"><label class="f" for="riskEntry">進場價</label><input type="number" id="riskEntry" step="0.01" min="0"></div>
+          <div style="flex:1;min-width:0"><label class="f" for="riskStop">停損價</label><input type="number" id="riskStop" step="0.01" min="0"></div>
+        </div>
+        <p class="hint">進場價留空就用目前的開倉均價。虧損已含手續費與證交稅。</p>
+        <div id="riskOut"></div>
+      </div>
+
+      <div class="panel p-fee">
+        <h2>手續費與稅率</h2>
+        <label class="f" for="disc">手續費折扣</label>
+        <div class="row"><input type="number" id="disc" step="0.1" min="0.1" max="10"><span class="unit">折</span></div>
+        <div class="discounts" id="discBtns">
+          <button class="btn" data-d="4">4 折</button>
+          <button class="btn" data-d="2.8">2.8 折</button>
+          <button class="btn" data-d="6">6 折</button>
+          <button class="btn" data-d="10">無折扣</button>
+        </div>
+        <label class="f" for="minFee">最低手續費</label>
+        <div class="row"><input type="number" id="minFee" step="1" min="0"><span class="unit">元 / 筆</span></div>
+        <div class="rates">
+          基礎手續費率 <b>0.1425%</b><br>
+          折扣後 <b id="rateShown">0.057%</b><br>
+          賣出證交稅 <b id="taxShown">0.15%</b>
+        </div>
+      </div>
+    </aside>
+
+    <main class="panel p-main">
+      <div class="summary" id="summary"></div>
+      <div class="be-banner" id="beBanner"></div>
+      <div class="compare" id="compare"></div>
+      <div class="limits" id="limits"></div>
+      <p class="limit-src" id="limitSrc"></p>
+
+      <div class="sec">
+        <div class="toolbar">
+          <h3>分批平倉</h3>
+          <button class="btn quiet" id="exitsAuto">依目前開倉重排</button>
+        </div>
+        <div class="leg-head"><span id="exitPriceLabel">賣出價</span><span>張數</span><span></span></div>
+        <div id="exits"></div>
+        <button class="btn" id="addExit">＋ 再加一筆平倉</button>
+        <div id="exitOut"></div>
+      </div>
+
+      <div class="toolbar">
+        <h2>逐檔損益</h2>
+        <span class="unit" id="centerNote"></span>
+      </div>
+      <div class="expand"><button class="btn quiet" id="moreUp">↑ 再展開 5 檔</button></div>
+      <div class="tbl-wrap">
+        <table class="ticks">
+          <thead><tr>
+            <th>檔位</th><th id="thOpen">買入均價</th><th id="thClose">賣出價</th><th>證交稅</th><th>總手續費</th><th>淨損益</th><th>報酬率</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="expand"><button class="btn quiet" id="moreDown">↓ 再展開 5 檔</button></div>
+
+      <div class="foot">
+        <p>手續費＝成交金額 × 0.1425% × 折扣，捨去至元，每筆套用最低手續費。多筆開倉、分批平倉時手續費逐筆計算；逐檔表假設平倉一筆成交。</p>
+        <p>個股現股當沖賣出證交稅 0.15%（優惠至 2027 年底），ETF 0.1%，皆捨去至元。做空時證交稅落在先賣的那一邊。</p>
+        <p>漲跌停＝昨收 ±10%，再依升降單位往內取到檔位（漲停往下取、跌停往上取）；沒填昨收時用均價估算。用代號帶入 ETF 時照證交所資料：國內正 2 為 ±20%，含國外成分的 ETF 沒有漲跌幅限制。實際以交易所公告為準。</p>
+        <p>報酬率＝淨損益 ÷ 開倉成交金額。僅供試算，不構成投資建議。</p>
+      </div>
+    </main>
+  </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var BASE_RATE = 0.001425;
+  var KEY = 'twdaytrade-v1';
+
+  var state = {
+    kind: 'stock',
+    dir: 'long',
+    legs: [{ price: 35, lots: 10 }, { price: 34, lots: 10 }],
+    disc: 4,
+    minFee: 20,
+    upTicks: 10,
+    downTicks: 10,
+    limitUp: null,
+    limitDown: null,
+    prevClose: null,
+    risk: { budget: 3000, entry: null, stop: null },
+    exits: [],
+    quick: { on: false, price: 35, lots: 1 },
+    v: 2
+  };
+
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (saved && saved.legs && saved.legs.length) {
+      var wasV1 = !saved.v;
+      state = Object.assign(state, saved);
+      if (wasV1) { state.disc = 4; state.v = 2; }   // 舊版設定升級
+      state.risk = Object.assign({ budget: 3000, entry: null, stop: null }, saved.risk || {});
+      state.quick = Object.assign({ on: false, price: 35, lots: 1 }, saved.quick || {});
+      if (!Array.isArray(state.exits)) state.exits = [];
+    }
+  } catch (e) { /* 讀不到就用預設 */ }
+
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  // ---------- 升降單位 ----------
+  function tick(p) {
+    if (state.kind === 'etf') return p < 50 ? 0.01 : 0.05;
+    if (p < 10) return 0.01;
+    if (p < 50) return 0.05;
+    if (p < 100) return 0.1;
+    if (p < 500) return 0.5;
+    if (p < 1000) return 1;
+    return 5;
+  }
+  function round(x) { return Math.round(x * 100) / 100; }
+  function stepUp(p) { return round(p + tick(p)); }
+  function stepDown(p) {
+    var t = tick(p), next = round(p - t), t2 = tick(next);
+    if (t2 < t) next = round(p - t2);
+    return next;
+  }
+  function snapDown(p) { p = Math.round(p * 10000) / 10000; var t = tick(p); return round(Math.floor(p / t + 1e-9) * t); }
+  function snapUp(p) { p = Math.round(p * 10000) / 10000; var t = tick(p); return round(Math.ceil(p / t - 1e-9) * t); }
+  function favorable(p) { return state.dir === 'long' ? stepUp(p) : stepDown(p); }
+
+  // ---------- 費用 ----------
+  function discRate() { return BASE_RATE * (state.disc / 10); }
+  function fee(amount) { return Math.max(Math.floor(amount * discRate()), state.minFee); }
+  function taxRate() { return state.kind === 'etf' ? 0.001 : 0.0015; }
+  function tax(amount) { return Math.floor(amount * taxRate()); }
+
+  function fmt(n, opt) {
+    opt = opt || {};
+    var dp = opt.dp == null ? 0 : opt.dp;
+    var s = Math.abs(n).toLocaleString('zh-TW', { maximumFractionDigits: dp, minimumFractionDigits: dp });
+    if (opt.sign) return (n > 0 ? '+' : n < 0 ? '−' : '') + s;
+    return (n < 0 ? '−' : '') + s;
+  }
+  function cls(n) { return n > 0 ? 'pos' : n < 0 ? 'neg' : ''; }
+  function fmtPrice(p) {
+    var dp = p < 50 ? 2 : p < 500 ? 1 : 0;
+    if (state.kind === 'etf') dp = 2;
+    return p.toLocaleString('zh-TW', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  }
+
+  // ---------- 開倉 ----------
+  function openSide(legsIn) {
+    var legs = legsIn.filter(function (l) { return l.price > 0 && l.lots > 0; });
+    var shares = 0, amount = 0, feeSplit = 0, taxSplit = 0;
+    legs.forEach(function (l) {
+      var s = l.lots * 1000, a = l.price * s;
+      shares += s; amount += a;
+      feeSplit += fee(a);
+      if (state.dir === 'short') taxSplit += tax(a);
+    });
+    return {
+      legs: legs, shares: shares, amount: amount,
+      avg: shares ? amount / shares : 0,
+      feeSplit: feeSplit, feeMerged: shares ? fee(amount) : 0,
+      taxSplit: taxSplit, taxMerged: (state.dir === 'short' && shares) ? tax(amount) : 0
+    };
+  }
+
+  // 一次平倉在 closePrice
+  function calcRow(o, closePrice, merged) {
+    var closeAmt = closePrice * o.shares;
+    var openFee = merged ? o.feeMerged : o.feeSplit;
+    var closeFee = fee(closeAmt);
+    var t, net;
+    if (state.dir === 'long') {
+      t = tax(closeAmt);
+      net = closeAmt - o.amount - openFee - closeFee - t;
+    } else {
+      t = merged ? o.taxMerged : o.taxSplit;
+      net = o.amount - closeAmt - openFee - closeFee - t;
+    }
+    return { close: closePrice, tax: t, fees: openFee + closeFee, net: net, ret: o.amount ? net / o.amount : 0 };
+  }
+
+  // 漲跌幅: 個股與一般 ETF ±10%; 代號帶入時照資料改 (國內正2 ±20%, 含國外成分 0 = 無漲跌幅)
+  function limPct() { return state.limPct == null ? 0.1 : state.limPct; }
+  function limName(pc) { return pc === 0 ? '無漲跌幅限制' : '±' + Math.round(pc * 100) + '%'; }
+  // 漲跌停: 昨收 ±幅度 往內取檔位; 沒昨收就用均價估; 手動輸入優先; 無漲跌幅時上限放到無限大
+  function limitsFor(avg) {
+    var base = state.prevClose > 0 ? state.prevClose : avg, pc = limPct();
+    return {
+      up: state.limitUp != null ? state.limitUp : pc === 0 ? Infinity : snapDown(base * (1 + pc)),
+      down: state.limitDown != null ? state.limitDown : pc === 0 ? 0.01 : snapUp(base * (1 - pc)),
+      fromPrev: state.prevClose > 0, none: pc === 0, pct: pc
+    };
+  }
+
+  // 從 start 往有利方向一檔一檔找, 第一個淨損益 ≥ 0 的價位
+  function breakEven(o, start, lim) {
+    var p = start, n = 0;
+    for (; n <= 400; n++) {
+      if (calcRow(o, p, false).net >= 0) return { ticks: n, price: p };
+      var nx = favorable(p);
+      if (state.dir === 'long' ? nx > lim.up : nx < lim.down) return null;
+      p = nx;
+    }
+    return null;
+  }
+
+  // 從 start 往有利方向找淨損益 ≥ target 的價位
+  function priceForNet(o, start, target, lim) {
+    var p = start;
+    for (var n = 0; n <= 400; n++) {
+      if (calcRow(o, p, false).net >= target) return { ticks: n, price: p };
+      var nx = favorable(p);
+      if (state.dir === 'long' ? nx > lim.up : nx < lim.down) return null;
+      p = nx;
+    }
+    return null;
+  }
+
+  function ladder(center, up, down, lim) {
+    var rows = [], p = center;
+    for (var i = 1; i <= up; i++) {
+      var q = stepUp(p); if (q > lim.up) break; p = q;
+      rows.unshift({ label: '上 ' + i + ' 檔', p: p });
+    }
+    rows.push({ label: '均價檔', p: center, center: true });
+    p = center;
+    for (var j = 1; j <= down; j++) {
+      var r = stepDown(p); if (r < lim.down) break; p = r;
+      rows.push({ label: '下 ' + j + ' 檔', p: p });
+    }
+    rows.forEach(function (r) {
+      if (r.p === lim.up) r.limUp = true;
+      if (r.p === lim.down) r.limDown = true;
+    });
+    return rows;
+  }
+
+  // ---------- 完整版 ----------
+  function render() {
+    syncControls();
+    var o = openSide(state.legs);
+    var isLong = state.dir === 'long';
+    document.getElementById('legPriceLabel').textContent = isLong ? '買入價' : '賣出價';
+    document.getElementById('exitPriceLabel').textContent = isLong ? '賣出價' : '回補價';
+    document.getElementById('thOpen').textContent = isLong ? '買入均價' : '賣出均價';
+    document.getElementById('thClose').textContent = isLong ? '賣出價' : '回補價';
+    document.getElementById('rateShown').textContent = (discRate() * 100).toFixed(5).replace(/0+$/, '') + '%';
+    document.getElementById('taxShown').textContent = (taxRate() * 100).toFixed(2) + '%';
+
+    var sum = document.getElementById('summary');
+    sum.innerHTML = '';
+    if (!o.shares) {
+      sum.innerHTML = '<div class="stat"><div class="k">還沒有有效的開倉資料</div><div class="v">填入價格與張數</div></div>';
+      ['beBanner', 'compare', 'limits', 'rows', 'exitOut'].forEach(function (id) { document.getElementById(id).innerHTML = ''; });
+      document.getElementById('limitSrc').textContent = '';
+      renderRisk(o);
+      return;
+    }
+    var center = snapDown(o.avg);
+    var lim = limitsFor(o.avg);
+    var atCenter = calcRow(o, center, false);
+    stat(sum, '開倉成交金額', fmt(o.amount), '元');
+    stat(sum, '總數量', fmt(o.shares / 1000), '張');
+    stat(sum, '開倉均價', fmt(o.avg, { dp: 3 }), '元');
+    stat(sum, '原價平倉淨損益', fmt(atCenter.net, { sign: true }), '元', cls(atCenter.net));
+
+    // 回本
+    var be = breakEven(o, center, lim);
+    var bb = document.getElementById('beBanner');
+    if (be) {
+      bb.innerHTML = '<span class="big">回本要' + (isLong ? '漲' : '跌') + ' <em>' + be.ticks + '</em> 檔</span>' +
+        '<span class="d">從均價檔 ' + fmtPrice(center) + (isLong ? ' 漲到 ' : ' 跌到 ') + fmtPrice(be.price) +
+        '，淨損益 ' + fmt(calcRow(o, be.price, false).net, { sign: true }) + ' 元</span>';
+    } else {
+      bb.innerHTML = '<span class="big">到' + (isLong ? '漲停' : '跌停') + '都回不了本</span><span class="d">檢查張數、價格或費率</span>';
+    }
+
+    // 分筆 vs 合併
+    var diffFee = o.feeSplit - o.feeMerged, diffTax = o.taxSplit - o.taxMerged;
+    var rowSplit = calcRow(o, center, false), rowMerged = calcRow(o, center, true);
+    var diffNet = rowSplit.net - rowMerged.net;
+    document.getElementById('compare').innerHTML =
+      '<h3>分筆開倉 vs 合併成一筆（均價 ' + fmt(o.avg, { dp: 3 }) + ' × ' + fmt(o.shares / 1000) + ' 張）</h3>' +
+      '<table><tr><th></th><th>分 ' + o.legs.length + ' 筆</th><th>合併一筆</th><th>差額</th></tr>' +
+      '<tr><td>開倉手續費</td><td>' + fmt(o.feeSplit) + '</td><td>' + fmt(o.feeMerged) + '</td><td class="' + (diffFee ? '' : 'diff-zero') + '">' + fmt(diffFee, { sign: true }) + '</td></tr>' +
+      (isLong ? '' : '<tr><td>賣出證交稅</td><td>' + fmt(o.taxSplit) + '</td><td>' + fmt(o.taxMerged) + '</td><td class="' + (diffTax ? '' : 'diff-zero') + '">' + fmt(diffTax, { sign: true }) + '</td></tr>') +
+      '<tr><td>以 ' + fmtPrice(center) + ' 平倉淨損益</td><td class="' + cls(rowSplit.net) + '">' + fmt(rowSplit.net, { sign: true }) + '</td><td class="' + cls(rowMerged.net) + '">' + fmt(rowMerged.net, { sign: true }) + '</td><td class="' + (diffNet ? '' : 'diff-zero') + '">' + fmt(diffNet, { sign: true }) + '</td></tr></table>' +
+      '<p class="note">' + (diffNet === 0
+        ? '這組數字分筆或合併算出來一樣，差別只會出現在捨去至元或最低手續費被觸發的時候。'
+        : '差額來自每筆各自捨去至元、各自套用最低手續費；平倉價不同時差額也不變。') + '</p>';
+
+    // 漲跌停
+    var ru = calcRow(o, lim.up, false), rd = calcRow(o, lim.down, false);
+    var limEl = document.getElementById('limits');
+    if (lim.none) {
+      limEl.innerHTML = '<div class="callout warn" style="grid-column:1/-1;margin-top:0">這檔 ETF 含國外成分，<b>沒有漲跌幅限制</b>（證交所 / 櫃買資料），盤中可能大於 ±10%。</div>';
+    } else {
+    limEl.innerHTML = limitCard('up', '漲停', lim.up, ru, state.limitUp != null) + limitCard('down', '跌停', lim.down, rd, state.limitDown != null);
+    limEl.querySelector('#limUpIn').addEventListener('change', function () { state.limitUp = +this.value || null; save(); render(); });
+    limEl.querySelector('#limDownIn').addEventListener('change', function () { state.limitDown = +this.value || null; save(); render(); });
+    }
+    limEl.querySelectorAll('[data-auto]').forEach(function (b) {
+      b.addEventListener('click', function () { if (b.dataset.auto === 'up') state.limitUp = null; else state.limitDown = null; save(); render(); });
+    });
+    var src = document.getElementById('limitSrc');
+    src.className = 'limit-src' + (lim.fromPrev ? '' : ' warn');
+    src.textContent = lim.fromPrev
+      ? (lim.none ? '無漲跌幅限制（昨收 ' + fmtPrice(state.prevClose) + '）' : '依昨收 ' + fmtPrice(state.prevClose) + ' 計算（' + limName(lim.pct) + '）')
+      : '沒有填昨收，暫時用開倉均價 ' + limName(lim.pct) + ' 估算；跳空開盤時會不準，左邊填昨收就會改用正確算法。';
+
+    renderExits(o, center);
+
+    // 逐檔表
+    document.getElementById('centerNote').textContent = '以均價所在檔 ' + fmtPrice(center) + ' 為中心，升降單位 ' + tick(center);
+    var rows = ladder(center, state.upTicks, state.downTicks, lim);
+    var html = '';
+    rows.forEach(function (r) {
+      var c = calcRow(o, r.p, false);
+      var isBe = be && r.p === be.price;
+      var tag = r.limUp ? '（漲停）' : r.limDown ? '（跌停）' : '';
+      html += '<tr class="' + (r.center ? 'center ' : '') + (isBe ? 'be ' : '') + (r.limUp ? 'lim-up' : r.limDown ? 'lim-down' : '') + '">' +
+        '<td>' + r.label + tag + (isBe ? '（損益兩平）' : '') + '</td>' +
+        '<td>' + fmt(o.avg, { dp: 3 }) + '</td>' +
+        '<td>' + fmtPrice(r.p) + '</td>' +
+        '<td>' + fmt(c.tax) + '</td>' +
+        '<td>' + fmt(c.fees) + '</td>' +
+        '<td class="' + cls(c.net) + '">' + fmt(c.net, { sign: true }) + '</td>' +
+        '<td class="' + cls(c.net) + '">' + fmt(c.ret * 100, { sign: true, dp: 2 }) + '%</td></tr>';
+    });
+    document.getElementById('rows').innerHTML = html;
+
+    renderRisk(o);
+  }
+
+  function stat(parent, k, v, unit, extraCls) {
+    var d = document.createElement('div');
+    d.className = 'stat';
+    d.innerHTML = '<div class="k">' + k + '</div><div class="v ' + (extraCls || '') + '">' + v + '<small>' + unit + '</small></div>';
+    parent.appendChild(d);
+  }
+  function limitCard(kind, title, price, r, manual) {
+    return '<div class="limit ' + kind + '">' +
+      '<div class="t"><span>' + title + (manual ? '（手動）' : '') + '</span>' + (manual ? '<button class="btn quiet" data-auto="' + kind + '">恢復自動</button>' : '') + '</div>' +
+      '<input type="number" step="0.01" id="' + (kind === 'up' ? 'limUpIn' : 'limDownIn') + '" value="' + price + '" aria-label="' + title + '價格">' +
+      '<div class="pl ' + cls(r.net) + '">' + fmt(r.net, { sign: true }) + ' 元</div>' +
+      '<div class="d">報酬率 ' + fmt(r.ret * 100, { sign: true, dp: 2 }) + '%　證交稅 ' + fmt(r.tax) + '　手續費 ' + fmt(r.fees) + '</div></div>';
+  }
+
+  // ---------- 分批平倉 ----------
+  function autoExits(o, center) {
+    var lots = o.shares / 1000;
+    var a = Math.ceil(lots / 2), b = lots - a;
+    var p1 = center, p2;
+    for (var i = 0; i < 3; i++) p1 = favorable(p1);
+    p2 = p1;
+    for (var j = 0; j < 3; j++) p2 = favorable(p2);
+    state.exits = b > 0 ? [{ price: p1, lots: a }, { price: p2, lots: b }] : [{ price: p1, lots: a }];
+  }
+  function renderExits(o, center) {
+    if (!state.exits.length) { autoExits(o, center); save(); }
+    var box = document.getElementById('exits');
+    var ae = document.activeElement;
+    if (!(box.contains(ae) && ae.tagName === 'INPUT')) {
+      box.innerHTML = '';
+      state.exits.forEach(function (l, i) {
+        var d = document.createElement('div');
+        d.className = 'leg';
+        d.innerHTML =
+          '<input type="number" step="0.01" min="0" value="' + l.price + '" data-i="' + i + '" data-k="price" aria-label="第 ' + (i + 1) + ' 筆平倉價">' +
+          '<input type="number" step="1" min="0" value="' + l.lots + '" data-i="' + i + '" data-k="lots" aria-label="第 ' + (i + 1) + ' 筆平倉張數">' +
+          '<button class="x" data-del="' + i + '" aria-label="刪除這筆平倉"' + (state.exits.length === 1 ? ' disabled' : '') + '>×</button>';
+        box.appendChild(d);
+      });
+      box.querySelectorAll('input').forEach(function (inp) {
+        inp.addEventListener('input', function () { state.exits[+inp.dataset.i][inp.dataset.k] = +inp.value || 0; save(); render(); });
+      });
+      box.querySelectorAll('[data-del]').forEach(function (b) {
+        b.addEventListener('click', function () { state.exits.splice(+b.dataset.del, 1); save(); render(); });
+      });
+    }
+
+    var out = document.getElementById('exitOut');
+    var exits = state.exits.filter(function (e) { return e.price > 0 && e.lots > 0; });
+    var exitLots = exits.reduce(function (s, e) { return s + e.lots; }, 0);
+    var openLots = o.shares / 1000;
+    if (exitLots !== openLots) {
+      out.innerHTML = '<div class="callout warn">平倉合計 ' + fmt(exitLots) + ' 張，開倉 ' + fmt(openLots) + ' 張，' +
+        (exitLots < openLots ? '還差 ' + fmt(openLots - exitLots) + ' 張沒有規劃。' : '多了 ' + fmt(exitLots - openLots) + ' 張。') + '張數對齊之後才會算損益。</div>';
+      return;
+    }
+    var closeAmt = 0, closeFee = 0, closeTax = 0;
+    exits.forEach(function (e) {
+      var a = e.price * e.lots * 1000;
+      closeAmt += a; closeFee += fee(a);
+      if (state.dir === 'long') closeTax += tax(a);
+    });
+    var net = state.dir === 'long'
+      ? closeAmt - o.amount - o.feeSplit - closeFee - closeTax
+      : o.amount - closeAmt - o.feeSplit - closeFee - o.taxSplit;
+    var taxAll = state.dir === 'long' ? closeTax : o.taxSplit;
+    var oneShot = calcRow(o, snapDown(closeAmt / o.shares), false);
+    out.innerHTML = '<div class="result-line">' +
+      '<span>平倉均價 <b>' + fmt(closeAmt / o.shares, { dp: 3 }) + '</b></span>' +
+      '<span>手續費 <b>' + fmt(o.feeSplit + closeFee) + '</b></span>' +
+      '<span>證交稅 <b>' + fmt(taxAll) + '</b></span>' +
+      '<span>淨損益 <b class="' + cls(net) + '">' + fmt(net, { sign: true }) + '</b> 元（' + fmt(o.amount ? net / o.amount * 100 : 0, { sign: true, dp: 2 }) + '%）</span>' +
+      '</div><p class="hint">分 ' + exits.length + ' 筆平倉比在 ' + fmtPrice(snapDown(closeAmt / o.shares)) + ' 一次平倉多付手續費 ' +
+      fmt(o.feeSplit + closeFee - oneShot.fees) + ' 元。</p>';
+  }
+
+  // ---------- 依風險算張數 ----------
+  function renderRisk(oAll) {
+    var out = document.getElementById('riskOut');
+    var isLong = state.dir === 'long';
+    var entry = state.risk.entry > 0 ? state.risk.entry : (oAll.shares ? snapDown(oAll.avg) : 0);
+    var riskEntry = document.getElementById('riskEntry');
+    riskEntry.placeholder = entry ? fmtPrice(entry) : '';
+    var stop = state.risk.stop, budget = state.risk.budget;
+    if (!entry) { out.innerHTML = ''; return; }
+    if (!(stop > 0)) {
+      out.innerHTML = '<p class="hint">填停損價就會算出建議張數與停利價。</p>';
+      return;
+    }
+    if (isLong ? stop >= entry : stop <= entry) {
+      out.innerHTML = '<div class="callout warn">' + (isLong ? '做多的停損價要低於進場價。' : '做空的停損價要高於進場價。') + '</div>';
+      return;
+    }
+    var lots = 0, loss = 0, o1 = null;
+    for (var n = 1; n <= 999; n++) {
+      var o = openSide([{ price: entry, lots: n }]);
+      var l = -calcRow(o, stop, false).net;
+      if (l > budget) break;
+      lots = n; loss = l; o1 = o;
+    }
+    var stopTicks = 0, p = entry;
+    while (p !== stop && stopTicks < 400) { p = isLong ? stepDown(p) : stepUp(p); stopTicks++; if (isLong ? p < stop : p > stop) break; }
+    if (!lots) {
+      var oneLoss = -calcRow(openSide([{ price: entry, lots: 1 }]), stop, false).net;
+      out.innerHTML = '<div class="callout warn">預算不夠下 1 張：1 張打到停損就虧 ' + fmt(oneLoss) + ' 元。把停損拉近或提高預算。</div>';
+      return;
+    }
+    var lim = limitsFor(entry);
+    var rows = '';
+    [1, 2, 3].forEach(function (k) {
+      var t = priceForNet(o1, entry, k * loss, lim);
+      rows += '<tr><td>' + k + 'R（+' + fmt(k * loss) + '）</td>' +
+        (t ? '<td>' + fmtPrice(t.price) + '</td><td>' + t.ticks + ' 檔</td><td class="pos">' + fmt(calcRow(o1, t.price, false).net, { sign: true }) + '</td>'
+           : '<td colspan="3">超過' + (isLong ? '漲停' : '跌停') + '</td>') + '</tr>';
+    });
+    out.innerHTML =
+      '<div class="result-line"><span>建議 <b>' + lots + '</b> 張</span><span>打到停損虧 <b class="neg">' + fmt(-loss, { sign: true }) + '</b></span><span>停損距離 ' + stopTicks + ' 檔</span></div>' +
+      '<table class="mini" style="margin-top:.5rem"><tr><th>停利</th><th>價格</th><th>距離</th><th>淨賺</th></tr>' + rows + '</table>' +
+      '<div class="row" style="margin-top:.6rem"><button class="btn" id="riskApply">用 ' + lots + ' 張 @ ' + fmtPrice(entry) + ' 當開倉</button></div>';
+    document.getElementById('riskApply').addEventListener('click', function () {
+      state.legs = [{ price: entry, lots: lots }];
+      state.exits = []; state.limitUp = null; state.limitDown = null;
+      save(); renderLegs(); render();
+    });
+  }
+
+  // ---------- 盤中模式 ----------
+  var wakeLock = null;
+  function setQuick(on) {
+    state.quick.on = on; save();
+    document.getElementById('quickView').hidden = !on;
+    document.getElementById('fullView').hidden = on;
+    document.getElementById('quickBtn').hidden = on;
+    if (on) {
+      renderQuick();
+      try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (w) { wakeLock = w; }, function () {}); } catch (e) {}
+    } else {
+      try { if (wakeLock) wakeLock.release(); } catch (e) {}
+      wakeLock = null;
+      render();
+    }
+  }
+  function renderQuick() {
+    syncControls();
+    var q = state.quick, isLong = state.dir === 'long';
+    document.getElementById('qPriceLabel').textContent = isLong ? '買進價' : '放空價';
+    var qp = document.getElementById('qPrice'), ql = document.getElementById('qLots');
+    if (document.activeElement !== qp) qp.value = q.price;
+    if (document.activeElement !== ql) ql.value = q.lots;
+    var o = openSide([{ price: q.price, lots: q.lots }]);
+    var head = document.getElementById('qHead'), lad = document.getElementById('qLadder');
+    if (!o.shares) { head.innerHTML = '<div class="d">填進場價與張數</div>'; lad.innerHTML = ''; return; }
+    var center = snapDown(q.price), lim = limitsFor(q.price);
+    var be = breakEven(o, center, lim);
+    head.innerHTML = be
+      ? '<div class="big">回本' + (isLong ? '漲' : '跌') + ' <em>' + be.ticks + '</em> 檔</div><div class="d">' + fmtPrice(be.price) + ' 才不虧 · 原價出場 ' + fmt(calcRow(o, center, false).net, { sign: true }) + ' 元</div>'
+      : '<div class="big">到' + (isLong ? '漲停' : '跌停') + '都回不了本</div>';
+    var rows = ladder(center, 6, 6, lim), html = '';
+    rows.forEach(function (r) {
+      var c = calcRow(o, r.p, false), isBe = be && r.p === be.price;
+      html += '<tr class="' + (r.center ? 'center ' : '') + (isBe ? 'be ' : '') + (r.limUp ? 'lim-up' : r.limDown ? 'lim-down' : '') + '">' +
+        '<td>' + (r.center ? '進場' : r.label.replace(' 檔', '')) + (r.limUp ? ' 漲停' : r.limDown ? ' 跌停' : '') + (isBe ? ' 回本' : '') + '</td>' +
+        '<td>' + fmtPrice(r.p) + '</td><td class="' + cls(c.net) + '">' + fmt(c.net, { sign: true }) + '</td></tr>';
+    });
+    lad.innerHTML = html;
+    document.getElementById('qNote').textContent = (state.kind === 'etf' ? 'ETF' : '個股') + ' · 手續費 ' + state.disc + ' 折 · ' +
+      (lim.none ? '無漲跌幅限制' : (lim.fromPrev ? '漲跌停依昨收 ' + fmtPrice(state.prevClose) : '沒填昨收，漲跌停用進場價估') + (lim.pct !== 0.1 ? '（' + limName(lim.pct) + '）' : ''));
+  }
+
+  // ---------- 開倉筆數 ----------
+  function renderLegs() {
+    var box = document.getElementById('legs');
+    box.innerHTML = '';
+    state.legs.forEach(function (l, i) {
+      var d = document.createElement('div');
+      d.className = 'leg';
+      d.innerHTML =
+        '<input type="number" step="0.01" min="0" value="' + l.price + '" data-i="' + i + '" data-k="price" aria-label="第 ' + (i + 1) + ' 筆價格">' +
+        '<input type="number" step="1" min="0" value="' + l.lots + '" data-i="' + i + '" data-k="lots" aria-label="第 ' + (i + 1) + ' 筆張數">' +
+        '<button class="x" data-del="' + i + '" aria-label="刪除這筆"' + (state.legs.length === 1 ? ' disabled' : '') + '>×</button>';
+      box.appendChild(d);
+    });
+    box.querySelectorAll('input').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        state.legs[+inp.dataset.i][inp.dataset.k] = +inp.value || 0;
+        state.limitUp = null; state.limitDown = null;
+        save(); render();
+      });
+    });
+    box.querySelectorAll('[data-del]').forEach(function (b) {
+      b.addEventListener('click', function () { state.legs.splice(+b.dataset.del, 1); save(); renderLegs(); render(); });
+    });
+  }
+
+  // ---------- 控制項 ----------
+  function syncControls() {
+    [['segKind', 'kind'], ['qKind', 'kind'], ['segDir', 'dir'], ['qDir', 'dir']].forEach(function (pair) {
+      document.getElementById(pair[0]).querySelectorAll('button').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.v === state[pair[1]]));
+      });
+    });
+    document.querySelectorAll('#discBtns .btn').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(+b.dataset.d === +state.disc));
+    });
+  }
+  function rerender() { if (state.quick.on) renderQuick(); else render(); }
+
+  [['segKind', 'kind'], ['qKind', 'kind'], ['segDir', 'dir'], ['qDir', 'dir']].forEach(function (pair) {
+    document.getElementById(pair[0]).querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (state[pair[1]] === b.dataset.v) return;
+        state[pair[1]] = b.dataset.v;
+        state.limitUp = null; state.limitDown = null;
+        if (pair[1] === 'kind') state.limPct = null;   // 手動切個股 / ETF 就回到 ±10%
+        if (pair[1] === 'dir') state.exits = [];
+        save(); rerender();
+        if (pbSel.code && SNAP && SNAP.stocks[pbSel.code] && document.getElementById('pbBox')) renderPB(pbSel.code, SNAP.stocks[pbSel.code]);
+      });
+    });
+  });
+
+  var discIn = document.getElementById('disc'), minIn = document.getElementById('minFee');
+  var prevIn = document.getElementById('prevClose');
+  var rbIn = document.getElementById('riskBudget'), reIn = document.getElementById('riskEntry'), rsIn = document.getElementById('riskStop');
+  discIn.value = state.disc; minIn.value = state.minFee;
+  prevIn.value = state.prevClose || '';
+  rbIn.value = state.risk.budget; reIn.value = state.risk.entry || ''; rsIn.value = state.risk.stop || '';
+  discIn.addEventListener('input', function () { state.disc = +this.value || 10; save(); render(); });
+  minIn.addEventListener('input', function () { state.minFee = +this.value || 0; save(); render(); });
+  prevIn.addEventListener('input', function () { state.prevClose = +this.value || null; state.limitUp = null; state.limitDown = null; save(); render(); });
+  rbIn.addEventListener('input', function () { state.risk.budget = +this.value || 0; save(); render(); });
+  reIn.addEventListener('input', function () { state.risk.entry = +this.value || null; save(); render(); });
+  rsIn.addEventListener('input', function () { state.risk.stop = +this.value || null; save(); render(); });
+  document.querySelectorAll('#discBtns .btn').forEach(function (b) {
+    b.addEventListener('click', function () { state.disc = +b.dataset.d; discIn.value = state.disc; save(); render(); });
+  });
+
+  document.getElementById('addLeg').addEventListener('click', function () {
+    var last = state.legs[state.legs.length - 1] || { price: 0, lots: 1 };
+    state.legs.push({ price: last.price, lots: last.lots });
+    save(); renderLegs(); render();
+  });
+  document.getElementById('reset').addEventListener('click', function () {
+    state.legs = [{ price: 100, lots: 1 }];
+    state.kind = 'stock'; state.dir = 'long'; state.disc = 4; state.minFee = 20;
+    state.upTicks = 10; state.downTicks = 10; state.limitUp = null; state.limitDown = null;
+    state.prevClose = null; state.exits = []; state.limPct = null;
+    state.risk = { budget: 3000, entry: null, stop: null };
+    discIn.value = 4; minIn.value = 20; prevIn.value = ''; rbIn.value = 3000; reIn.value = ''; rsIn.value = '';
+    save(); renderLegs(); render();
+  });
+  document.getElementById('addExit').addEventListener('click', function () {
+    var last = state.exits[state.exits.length - 1] || { price: 0, lots: 1 };
+    state.exits.push({ price: favorable(last.price || 1), lots: 1 });
+    save(); render();
+  });
+  document.getElementById('exitsAuto').addEventListener('click', function () { state.exits = []; save(); render(); });
+  document.getElementById('moreUp').addEventListener('click', function () { state.upTicks += 5; save(); render(); });
+  document.getElementById('moreDown').addEventListener('click', function () { state.downTicks += 5; save(); render(); });
+
+  // 盤中模式控制
+  document.getElementById('quickBtn').addEventListener('click', function () {
+    var o = openSide(state.legs);
+    if (o.shares) { state.quick.price = snapDown(o.avg); state.quick.lots = o.shares / 1000; }
+    setQuick(true);
+  });
+  document.getElementById('quickExit').addEventListener('click', function () { setQuick(false); });
+  document.getElementById('qToFull').addEventListener('click', function () {
+    state.legs = [{ price: state.quick.price, lots: state.quick.lots }];
+    state.exits = []; state.limitUp = null; state.limitDown = null;
+    renderLegs(); setQuick(false);
+  });
+  document.getElementById('qPrice').addEventListener('input', function () { state.quick.price = +this.value || 0; save(); renderQuick(); });
+  document.getElementById('qLots').addEventListener('input', function () { state.quick.lots = Math.max(0, Math.floor(+this.value || 0)); save(); renderQuick(); });
+  document.querySelectorAll('[data-q]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var p = state.quick.price || 0;
+      state.quick.price = +b.dataset.q > 0 ? stepUp(snapDown(p)) : stepDown(snapUp(p));
+      save(); renderQuick();
+    });
+  });
+  document.querySelectorAll('[data-ql]').forEach(function (b) {
+    b.addEventListener('click', function () { state.quick.lots = Math.max(1, (state.quick.lots || 0) + +b.dataset.ql); save(); renderQuick(); });
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (state.quick.on && document.visibilityState === 'visible' && navigator.wakeLock) {
+      try { navigator.wakeLock.request('screen').then(function (w) { wakeLock = w; }, function () {}); } catch (e) {}
+    }
+  });
+
+  // ---------- 代號帶入 (資料由盤後整理, 跟頁面一起發布) ----------
+  var SNAP = null, MIN = null, PB = null, dataP = null;
+  var codeIn = document.getElementById('codeIn'), codeMsg = document.getElementById('codeMsg'), infoCard = document.getElementById('infoCard');
+  function getJSON(u) { return fetch(u, { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); }
+  function loadData() {
+    if (!dataP) dataP = Promise.all([getJSON('snapshot.json'), getJSON('minute.json'), getJSON('playbook.json')]).then(function (a) { SNAP = a[0]; MIN = a[1]; PB = a[2]; });
+    return dataP;
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function mmdd(d) { return d ? +d.slice(5, 7) + '/' + +d.slice(8, 10) : ''; }
+  function lots(n, sign) { return n == null ? '<span class="na">暫缺</span>' : '<span class="' + (sign ? cls(n) : '') + '">' + fmt(n, { sign: !!sign }) + ' 張</span>'; }
+  function pct(n, sign) { return n == null ? '—' : fmt(n, { sign: sign !== false, dp: 2 }) + '%'; }
+
+  // 輸入可以是代號、「代號 名稱」(候選清單選的) 或名稱; 名稱先找完全一樣, 再找開頭一樣、包含, 只有一檔才帶入
+  function resolveCode(q) {
+    q = String(q || '').trim();
+    var first = q.split(/\s+/)[0].toUpperCase();
+    if (SNAP.stocks[first]) return first;
+    var hit = [], all = Object.keys(SNAP.stocks);
+    [function (n) { return n === q; }, function (n) { return n.indexOf(q) === 0; }, function (n) { return n.indexOf(q) >= 0; }].some(function (f) {
+      hit = all.filter(function (c) { return f(SNAP.stocks[c].name || ''); });
+      return hit.length > 0;
+    });
+    return hit.length === 1 ? hit[0] : (hit.length ? { many: hit.slice(0, 5) } : first);
+  }
+  function fillMeta() {
+    var dm = document.getElementById('dataMeta');
+    if (!SNAP || !SNAP.stocks) { dm.textContent = '盤後資料讀不到'; return; }
+    var n = { TWSE: 0, TPEx: 0, etf: 0 }, opts = [];
+    Object.keys(SNAP.stocks).forEach(function (c) {
+      var s = SNAP.stocks[c];
+      if (/^00/.test(c)) n.etf++; else if (s.market === 'TWSE') n.TWSE++; else n.TPEx++;
+      opts.push('<option value="' + esc(c + ' ' + (s.name || '')) + '"></option>');
+    });
+    document.getElementById('codeList').innerHTML = opts.join('');
+    var m = SNAP.meta || {};
+    dm.innerHTML = '支援 <b>' + fmt(n.TWSE + n.TPEx + n.etf) + '</b> 檔：上市 ' + fmt(n.TWSE) + '、上櫃 ' + fmt(n.TPEx) + '、ETF ' + fmt(n.etf) + '<br>' +
+      '收盤資料 <b>' + mmdd(m.price_date) + '</b>' + (m.official_date ? '　籌碼 <b>' + mmdd(m.official_date) + '</b>' : '') + '<br>' +
+      '上次更新 ' + esc(m.generated || '—') + (MIN && MIN.date ? '　1 分 K ' + mmdd(MIN.date) : '');
+  }
+  loadData().then(fillMeta);
+
+  function lookup(code, fill) {
+    code = String(code || '').trim();
+    if (!code) return;
+    codeMsg.textContent = '讀取資料中…';
+    loadData().then(function () {
+      if (!SNAP || !SNAP.stocks) { codeMsg.textContent = '盤後資料讀不到，先手動填昨收。'; infoCard.innerHTML = ''; return; }
+      var rc = resolveCode(code);
+      if (rc && rc.many) { codeMsg.textContent = '「' + code + '」符合好幾檔：' + rc.many.map(function (c) { return c + ' ' + SNAP.stocks[c].name; }).join('、') + '…，打代號或從清單選。'; return; }
+      code = rc;
+      var s = SNAP.stocks[code];
+      if (!s) { codeMsg.textContent = '找不到 ' + code + '：資料只有上市櫃普通股與 ETF（不含權證、ETN）。'; infoCard.innerHTML = ''; return; }
+      var kind = /^00/.test(code) ? 'etf' : 'stock';
+      // 帶入: 第一次輸入, 或之前帶入的昨收還沒被手動改過、資料換日了 → 更新
+      var auto = state.codeFill && state.codeFill.code === code && state.prevClose === state.codeFill.close && state.codeFill.close !== s.close;
+      if (fill || auto) {
+        state.kind = kind; state.prevClose = s.close; state.limitUp = null; state.limitDown = null;
+        state.limPct = s.lim_pct != null ? s.lim_pct : null;
+        state.codeFill = { code: code, close: s.close, date: s.date };
+        prevIn.value = s.close;
+      }
+      state.code = code; save(); rerender();
+      codeIn.value = code;
+      codeMsg.textContent = (fill || auto) ? '已帶入 ' + mmdd(s.date) + ' 收盤 ' + fmtPrice(s.close) + ' 當昨收' + (auto && !fill ? '（資料換日自動更新）' : '') + '。' : '';
+      renderInfo(code, s);
+    });
+  }
+
+  // 這檔明天的漲跌停 (照資料的漲跌幅; 無漲跌幅時 lu = Infinity, ld = 0)
+  function limOf(s) {
+    var pc = s.lim_pct != null ? s.lim_pct : 0.1;
+    if (pc === 0) return { lu: Infinity, ld: 0, pc: 0 };
+    return { lu: snapDown(s.close * (1 + pc)), ld: snapUp(s.close * (1 - pc)), pc: pc };
+  }
+  function etfLimitNote(s) {
+    if (s.lim_pct == null) return '';
+    var t = s.lim_pct === 0 ? '含國外成分，<b>沒有漲跌幅限制</b>' : '漲跌幅 <b>' + limName(s.lim_pct) + '</b>' + (s.lim_pct > 0.1 ? '（國內槓桿 ETF＝10% × 倍數）' : '（國內成分）');
+    return '<p class="hint">ETF ' + t + '。' + (s.lim_src === 'name' ? '上櫃 ETF 依名稱推定，下單前以櫃買公告為準。' : '依證交所 ETF 基本資料。') + '</p>';
+  }
+  function renderInfo(code, s) {
+    var L = limOf(s), lu = L.lu, ld = L.ld;
+    document.getElementById('codeSum').innerHTML = '<div class="code-sum"><span class="nm">' + esc(code) + ' ' + esc(s.name) + '</span>' +
+      '<span>' + mmdd(s.date) + ' 收 <b>' + fmtPrice(s.close) + '</b></span>' +
+      (L.pc === 0 ? '<span>無漲跌幅限制</span>' : '<span>漲停 <b class="pos">' + fmtPrice(lu) + '</b></span><span>跌停 <b class="neg">' + fmtPrice(ld) + '</b></span>') + '</div>';
+    var volR = s.vol20_lots ? s.vol_lots / s.vol20_lots : null;
+    var d = s.dt60 || {};
+    var h = '<div class="info-head"><span class="nm">' + esc(code) + ' ' + esc(s.name) + '</span><span class="dt">' +
+      (s.market === 'TPEx' || s.market === 'TPEX' ? '上櫃' : '上市') + ' · ' + mmdd(s.date) + ' 收盤資料</span></div>' +
+      '<div class="kv">' +
+      '<div><span>收盤（＝明天的昨收）</span><span>' + fmtPrice(s.close) + '</span></div>' +
+      '<div><span>開盤</span><span>' + fmtPrice(s.open) + '</span></div>' +
+      '<div><span>最高 / 最低</span><span>' + fmtPrice(s.high) + ' / ' + fmtPrice(s.low) + '</span></div>' +
+      '<div><span>振幅</span><span>' + s.amp_ticks + ' 檔</span></div>' +
+      '<div><span>成交量</span><span>' + fmt(s.vol_lots) + ' 張</span></div>' +
+      '<div><span>20 日均量</span><span>' + (s.vol20_lots ? fmt(s.vol20_lots) + ' 張' : '—') + (volR ? ' <span class="na">(' + volR.toFixed(1) + ' 倍)</span>' : '') + '</span></div>' +
+      '<div><span>均價</span><span>' + (s.avg_price ? fmtPrice(s.avg_price) : '<span class="na">等官方資料</span>') + '</span></div>' +
+      '<div><span>明日漲 / 跌停</span><span>' + (L.pc === 0 ? '無漲跌幅限制' : '<span class="pos">' + fmtPrice(lu) + '</span> / <span class="neg">' + fmtPrice(ld) + '</span>' + (L.pc !== 0.1 ? ' <span class="na">(' + limName(L.pc) + ')</span>' : '')) + '</span></div>' +
+      '<div><span>融資增減</span>' + lots(s.margin_chg_lots, true) + '</div>' +
+      '<div><span>融券增減</span>' + lots(s.short_chg_lots, true) + '</div>' +
+      '<div><span>三大法人</span>' + (s.insti_net_lots == null ? '<span class="na">' + (s.market === 'TWSE' ? '上市暫缺' : '暫缺') + '</span>' : lots(s.insti_net_lots, true)) + '</div>' +
+      '<div><span>籌碼日期</span><span>' + (s.chips_date ? mmdd(s.chips_date) : '—') + '</span></div>' +
+      '</div>' +
+      (/^00/.test(code) ? (etfLimitNote(s) || '<p class="hint">ETF 漲跌停：這檔沒有漲跌幅資料，照 ±10% 估，下單前以交易所公告為準。</p>') : '');
+    if (d.n) {
+      h += '<div class="info-sec"><h3>近 ' + d.n + ' 日當沖體檢（開盤進、收盤出）</h3>' +
+        '<table class="mini"><tr><th></th><th>勝率</th><th>平均每筆</th></tr>' +
+        '<tr><td>開盤買、收盤賣</td><td>' + Math.round(d.long_win * 100) + '%</td><td class="' + cls(d.long_exp_pct) + '">' + pct(d.long_exp_pct) + '</td></tr>' +
+        '<tr><td>開盤空、收盤補</td><td>' + Math.round(d.short_win * 100) + '%</td><td class="' + cls(d.short_exp_pct) + '">' + pct(d.short_exp_pct) + '</td></tr></table>' +
+        '<p class="hint">開→收漲跌：10% 的日子低於 ' + pct(d.oc_p10_pct) + '，平均 ' + pct(d.oc_mean_pct) + '，10% 的日子高於 ' + pct(d.oc_p90_pct) +
+        '；平均振幅 ' + (d.amp_ticks != null ? d.amp_ticks.toFixed(1) : '—') + ' 檔。勝率與平均已扣手續費 4 折、當沖稅 0.15%、進出各 1 檔滑價。歷史統計，不是建議。</p></div>';
+    }
+    var m = MIN && MIN.codes && MIN.codes[code];
+    h += '<div class="info-sec"><h3>1 分 K' + (m ? ' · ' + mmdd(MIN.date) + ' 整天' : '') + '</h3>' +
+      (m ? '<canvas class="kchart" id="kchart" role="img" aria-label="' + esc(code) + ' ' + mmdd(MIN.date) + ' 的 1 分 K 線、成交量與均價線"></canvas>' +
+        '<div class="klegend"><span><i></i>均價線</span><span>上：K 線　下：每分鐘成交量（張）</span><span>資料：收盤後整理，非即時</span></div>'
+        : '<p class="hint">這檔沒有分 K：目前只收成交金額前 150 名與幾檔常見 ETF。</p>') + '</div>';
+    infoCard.innerHTML = h;
+    if (m) drawK(m);
+    renderPB(code, s);
+  }
+
+  function drawK(m) {
+    var cv = document.getElementById('kchart');
+    if (!cv) return;
+    var css = getComputedStyle(document.documentElement);
+    var col = function (n) { return css.getPropertyValue(n).trim(); };
+    var W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+    cv.width = W * dpr; cv.height = H * dpr;
+    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    var n = m.c.length, padL = 6, padR = 46, top = 8, priceH = H * 0.68, volTop = priceH + 18, volH = H - volTop - 16;
+    var hi = Math.max.apply(null, m.h), lo = Math.min.apply(null, m.l);
+    if (hi === lo) { hi += 0.01; lo -= 0.01; }
+    var plotW = W - padL - padR, bw = plotW / n;
+    var y = function (p) { return top + (hi - p) / (hi - lo) * (priceH - top); };
+    var maxV = Math.max.apply(null, m.v) || 1;
+    g.font = '10px system-ui, sans-serif'; g.textBaseline = 'middle';
+    // 價格格線與刻度 (右側)
+    g.strokeStyle = col('--line'); g.fillStyle = col('--muted'); g.lineWidth = 1;
+    for (var i = 0; i <= 3; i++) {
+      var p = lo + (hi - lo) * i / 3, yy = Math.round(y(p)) + .5;
+      g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
+      g.fillText(fmtPrice(round(p)), W - padR + 4, yy);
+    }
+    // 時間刻度
+    g.textBaseline = 'top';
+    ['09:00', '10:00', '11:00', '12:00', '13:00'].forEach(function (t) {
+      var idx = m.t.indexOf(t);
+      if (idx < 0) { for (var k = 0; k < n; k++) if (m.t[k] >= t) { idx = k; break; } }
+      if (idx >= 0) g.fillText(t, Math.min(padL + idx * bw, W - padR - 26), H - 13);
+    });
+    var up = col('--up'), dn = col('--down');
+    var pv = 0, vv = 0, vw = [];
+    for (var j = 0; j < n; j++) {
+      var x = padL + j * bw + bw / 2, isUp = m.c[j] >= m.o[j];
+      g.strokeStyle = g.fillStyle = isUp ? up : dn;
+      g.beginPath(); g.moveTo(x, y(m.h[j])); g.lineTo(x, y(m.l[j])); g.stroke();
+      var b1 = y(Math.max(m.o[j], m.c[j])), b2 = y(Math.min(m.o[j], m.c[j]));
+      g.fillRect(x - Math.max(bw * 0.35, .5), b1, Math.max(bw * 0.7, 1), Math.max(b2 - b1, 1));
+      var vh = m.v[j] / maxV * volH;
+      g.fillRect(x - Math.max(bw * 0.35, .5), volTop + volH - vh, Math.max(bw * 0.7, 1), vh);
+      pv += (m.h[j] + m.l[j] + m.c[j]) / 3 * m.v[j]; vv += m.v[j];
+      vw.push(vv ? pv / vv : m.c[j]);
+    }
+    g.strokeStyle = col('--accent'); g.lineWidth = 1.5; g.beginPath();
+    vw.forEach(function (p, k) { var x = padL + k * bw + bw / 2; if (k) g.lineTo(x, y(p)); else g.moveTo(x, y(p)); });
+    g.stroke();
+    g.fillStyle = col('--muted'); g.textBaseline = 'middle';
+    g.fillText(fmt(maxV) + ' 張', W - padR + 4, volTop + 4);
+  }
+
+  // ---------- 盤前作戰圖 (playbook.json: 2018 起日 K 的情境統計, 盤後整理) ----------
+  var GAP_MID = [-0.04, -0.02, -0.0065, 0, 0.0065, 0.02, 0.04];
+  var pbSel = { code: null, b: 3, open: null }, pbLast = null;
+  function ticksBetween(a, b) {   // a → b 要走幾檔 (b 在上面為正)
+    var n = 0, p = a;
+    if (b > a) { while (p < b - 1e-9 && n < 999) { p = stepUp(p); n++; } return n; }
+    while (p > b + 1e-9 && n < 999) { p = stepDown(p); n++; }
+    return -n;
+  }
+  function gapBucket(g) {
+    var e = PB.meta.gap_edges;
+    for (var i = 0; i < e.length; i++) if (g < e[i]) return i;
+    return e.length;
+  }
+  function pbValid(scn, side, tier) {
+    var tn = tier == null ? null : ['穩', '中', '活潑'][tier];
+    return (PB.meta.valid || []).some(function (v) { return v.scenario === scn && v.side === side && (v.tier === '全部' || v.tier === tn); });
+  }
+  function netCell(v, ok) { return v == null ? '<td class="ref">—</td>' : '<td class="' + (ok ? 'ok' : 'ref') + '">' + fmt(v, { sign: true, dp: 2 }) + '%</td>'; }
+  function roundStep(p) { return p < 10 ? 1 : p < 50 ? 5 : p < 100 ? 10 : p < 500 ? 50 : p < 1000 ? 100 : 500; }
+
+  function renderPB(code, s) {
+    var box = document.getElementById('pbBox');
+    if (!box) return;
+    var p = PB && PB.stocks && PB.stocks[code];
+    if (!p) { box.innerHTML = '<h3>盤前作戰圖</h3><p class="hint">' + (PB ? '這檔歷史資料不到半年，沒有情境統計。' : '情境資料讀不到。') + '</p>'; return; }
+    if (pbSel.code !== code) { pbSel = { code: code, b: 3, open: null }; }
+    var L = limOf(s), lu = L.lu, ld = L.ld;
+    var noneValid = !(PB.meta.valid || []).length;
+
+    // 1. 價位梯子
+    var lv = [{ k: '昨高', p: s.high, c: 'u' }];
+    if (L.pc !== 0) lv.push({ k: '漲停' + (L.pc !== 0.1 ? '（' + limName(L.pc) + '）' : ''), p: lu, c: 'u' });
+    if (s.avg_price) lv.push({ k: '昨均價', p: s.avg_price });
+    lv.push({ k: '昨收', p: s.close, base: true }, { k: '昨低', p: s.low, c: 'd' });
+    if (L.pc !== 0) lv.push({ k: '跌停', p: ld, c: 'd' });
+    var st = roundStep(s.close), r0 = Math.floor(s.close / st) * st;
+    [r0, r0 + st, r0 - st].forEach(function (r) {
+      if (r > ld && r < lu && r > 0 && !lv.some(function (x) { return Math.abs(x.p - r) < 1e-9; })) lv.push({ k: '整數關卡', p: r, rnd: true });
+    });
+    lv.sort(function (a, b) { return b.p - a.p; });
+    var o1 = openSide([{ price: s.close, lots: 1 }]);
+    var be = breakEven(o1, s.close, { up: lu, down: ld });
+    var lad = '<table class="pb-lad">';
+    lv.forEach(function (x) {
+      var t = ticksBetween(s.close, x.p);
+      lad += '<tr class="' + (x.c || '') + (x.base ? ' base' : '') + (x.rnd ? ' rnd' : '') + '"><td>' + x.k + '</td><td>' + fmtPrice(x.p) + '</td><td>' +
+        (x.base ? '基準' : fmt(t, { sign: true }) + ' 檔') + '</td><td>' + (x.base ? '' : fmt((x.p / s.close - 1) * 100, { sign: true, dp: 1 }) + '%') + '</td></tr>';
+    });
+    lad += '</table><p class="hint">在昨收價' + (state.dir === 'long' ? '買' : '空') + ' 1 張，回本要' + (state.dir === 'long' ? '漲 ' : '跌 ') +
+      (be ? '<b>' + be.ticks + '</b> 檔' : '超過漲跌停') + '（4 折、當沖稅、捨去至元）。昨高 / 昨低離昨收幾檔，就是今天要突破要走多遠。' + (L.pc === 0 ? '這檔沒有漲跌幅限制，梯子上不列漲跌停。' : '') + '</p>';
+
+    // 2. 開盤情境
+    var b = pbSel.open > 0 ? gapBucket(pbSel.open / s.close - 1) : pbSel.b;
+    var g = p.gaps[b] || { n: 0 };
+    var pool = PB.pooled[String(p.tier)] ? PB.pooled[String(p.tier)].gaps[b] : null;
+    var O = pbSel.open > 0 ? pbSel.open : snapDown(s.close * (1 + GAP_MID[b]));
+    var useG = g.n >= 20 ? g : pool, src = g.n >= 20 ? '這檔' : '同類股';
+    var chips = '<div class="pb-chips" role="group" aria-label="開盤跳空">';
+    PB.meta.gap_labels.forEach(function (l, i) { chips += '<button class="btn" data-pbb="' + i + '" aria-pressed="' + (i === b) + '">' + l + '</button>'; });
+    chips += '</div>';
+    var head = '', lst = '', svg = '';
+    if (useG && useG.n) {
+      var px = function (pc) { return snapDown(O * (1 + pc / 100)); };
+      head = '<p class="pb-head">' + src + '過去開在「' + PB.meta.gap_labels[b] + '」<b>' + fmt(useG.n) + '</b> 次：收紅 <b class="pos">' + Math.round(useG.up) + '%</b>、收黑 <b class="neg">' + Math.round(useG.dn) + '%</b>' +
+        (useG.fill != null ? '，盤中回到昨收 <b>' + Math.round(useG.fill) + '%</b>' : '') + '</p>';
+      lst = '<ul class="pb-list">' +
+        '<li><span>一半的日子最高到</span><span>' + fmtPrice(px(useG.oh[0])) + ' ~ ' + fmtPrice(px(useG.oh[2])) + '</span></li>' +
+        '<li><span>一半的日子最低到</span><span>' + fmtPrice(px(useG.ol[0])) + ' ~ ' + fmtPrice(px(useG.ol[2])) + '</span></li>' +
+        '<li><span>收盤 (8 成落在)</span><span>' + fmtPrice(px(useG.oc[0])) + ' ~ ' + fmtPrice(px(useG.oc[4])) + '</span></li>' +
+        '<li><span>開盤買→收盤賣</span><span>勝率 ' + Math.round(useG.Lw) + '%，平均 ' + pct(useG.L) + '</span></li>' +
+        '<li><span>開盤空→收盤補</span><span>勝率 ' + Math.round(useG.Sw) + '%，平均 ' + pct(useG.S) + '</span></li>' +
+        (pool && src === '這檔' ? '<li><span>同類股（' + ['穩', '中', '活潑'][p.tier] + '型）</span><span>多 ' + pct(pool.L) + ' / 空 ' + pct(pool.S) + '</span></li>' : '') +
+        '</ul>';
+      svg = '<svg class="pb-chart" id="pbChart" role="img" aria-label="開盤後最高、最低、收盤的常見範圍"></svg>';
+    } else {
+      head = '<p class="hint">這個開盤區間樣本太少。</p>';
+    }
+
+    // 3. 全部開盤區間一覽
+    var all = '<table class="pb-all"><tr><th>開盤</th><th>次數</th><th>收紅</th><th>回昨收</th><th>多</th><th>空</th></tr>';
+    p.gaps.forEach(function (x, i) {
+      var scn = '跳空 ' + PB.meta.gap_labels[i];
+      all += '<tr data-pbb="' + i + '" class="' + (i === b ? 'on' : '') + '"><td>' + PB.meta.gap_labels[i] + '</td><td>' + fmt(x.n) + '</td><td>' + (x.n ? Math.round(x.up) + '%' : '—') +
+        '</td><td>' + (x.fill != null ? Math.round(x.fill) + '%' : '—') + '</td>' + netCell(x.n ? x.L : null, pbValid(scn, '多 開→收', p.tier)) + netCell(x.n ? x.S : null, pbValid(scn, '空 開→收', p.tier)) + '</tr>';
+    });
+    all += '</table><p class="hint">多 / 空 = 開盤進、收盤出，每筆平均淨報酬（已扣成本）。點一列切換上面的情境。</p>';
+
+    // 4. 突破昨高 / 跌破昨低
+    var bk = '<table class="pb-all"><tr><th></th><th>發生</th><th>收盤守住</th><th>追進到收盤</th></tr>' +
+      '<tr><td>突破昨高 ' + fmtPrice(s.high) + '</td><td>' + Math.round(p.bh.rate || 0) + '%</td><td>' + Math.round(p.bh.hold || 0) + '%</td>' + netCell(p.bh.ret, pbValid('突破昨高', '多 觸發→收', p.tier)) + '</tr>' +
+      '<tr><td>跌破昨低 ' + fmtPrice(s.low) + '</td><td>' + Math.round(p.bl.rate || 0) + '%</td><td>' + Math.round(p.bl.hold || 0) + '%</td>' + netCell(p.bl.ret, pbValid('跌破昨低', '空 觸發→收', p.tier)) + '</tr></table>' +
+      '<p class="hint">「收盤守住」= 突破後收盤還在昨高之上（跌破同理）。「追進」= 多 1 檔買進 / 空 1 檔放空，收盤出場。</p>';
+
+    box.innerHTML = '' +
+      '<div class="pb-note">' + (noneValid
+        ? '2018 起全市場、樣本內 (2018–23) 與樣本外 (2024 起) 都看過：<b>沒有任何一個開盤情境扣完成本還能穩定賺</b>，所以數字都是灰色。這張圖是<b>行情地圖</b>：今天大概會走多遠、停損停利放哪裡，不是買賣訊號。'
+        : '藍色 = 樣本內外都站得住的情境；灰色只當參考。歷史統計，不是建議。') + '</div>' +
+      '<h3>價位梯子（距昨收幾檔）</h3>' + lad +
+      '<h3 style="margin-top:.8rem">開盤情境：如果開在…通常會…</h3>' +
+      '<div class="pb-open"><input type="number" id="pbOpen" step="0.01" min="0" inputmode="decimal" placeholder="開盤後填開盤價（可不填）" aria-label="今天開盤價" value="' + (pbSel.open || '') + '">' +
+      '<button class="btn quiet" id="pbClr">清除</button></div>' + chips + head + svg + lst +
+      '<h3 style="margin-top:.8rem">每個開盤區間一覽</h3>' + all +
+      '<h3 style="margin-top:.8rem">突破昨高 / 跌破昨低之後</h3>' + bk +
+      '<p class="hint">資料：' + esc(PB.meta.price_date) + ' 前的日 K（' + esc(p.from) + ' 起）。統計含手續費 4 折、當沖稅 0.15%（ETF 0.1%）、進出各 1 檔滑價；收盤鎖漲跌停出不掉的多扣 1%。' +
+      (src === '同類股' ? '這檔這個區間不到 20 次，改用同類股（' + esc(PB.meta.tiers[p.tier]) + '）。' : '') + '</p>';
+
+    box.querySelectorAll('[data-pbb]').forEach(function (el) {
+      el.addEventListener('click', function () { pbSel.b = +el.dataset.pbb; pbSel.open = null; renderPB(code, s); });
+    });
+    var oi = document.getElementById('pbOpen');
+    oi.addEventListener('change', function () { pbSel.open = +oi.value || null; renderPB(code, s); });
+    document.getElementById('pbClr').addEventListener('click', function () { pbSel.open = null; renderPB(code, s); });
+    pbLast = (useG && useG.n) ? [useG, O, s, lu, ld] : null;
+    if (pbLast) drawPB.apply(null, pbLast);
+  }
+
+  function drawPB(g, O, s, lu, ld) {
+    var sv = document.getElementById('pbChart');
+    if (!sv) return;
+    var css = getComputedStyle(document.documentElement), col = function (n) { return css.getPropertyValue(n).trim(); };
+    var W = sv.clientWidth || 300, H = 150, L = 62, R = 10;
+    sv.setAttribute('viewBox', '0 0 ' + W + ' ' + H); sv.setAttribute('height', H);
+    var P = function (pc) { return O * (1 + pc / 100); };
+    var vals = [P(g.oh[2]), P(g.ol[0]), P(g.oc[0]), P(g.oc[4]), O, s.close];
+    var lo = Math.max(ld, Math.min.apply(null, vals)), hi = Math.min(lu, Math.max.apply(null, vals));
+    var pad = (hi - lo) * 0.08 || O * 0.01; lo -= pad; hi += pad;
+    var x = function (p) { return L + (Math.min(Math.max(p, lo), hi) - lo) / (hi - lo) * (W - L - R); };
+    var out = '';
+    var vline = function (p, label, c, dash, yl) {
+      if (p < lo || p > hi) return;
+      out += '<line x1="' + x(p) + '" x2="' + x(p) + '" y1="18" y2="' + (H - 18) + '" stroke="' + c + '" stroke-width="1" ' + (dash ? 'stroke-dasharray="3 3"' : '') + '/>' +
+        '<text x="' + x(p) + '" y="' + yl + '" font-size="10" fill="' + c + '" text-anchor="middle">' + label + ' ' + fmtPrice(p) + '</text>';
+    };
+    vline(s.close, '昨收', col('--muted'), true, 12);
+    vline(O, '開', col('--accent'), false, H - 6);
+    if (s.high <= hi && s.high >= lo && Math.abs(x(s.high) - x(s.close)) > 50) vline(s.high, '昨高', col('--up'), true, 12);
+    if (s.low <= hi && s.low >= lo && Math.abs(x(s.low) - x(s.close)) > 50) vline(s.low, '昨低', col('--down'), true, 12);
+    var row = function (y, label, a, b, m, c, a2, b2) {
+      out += '<text x="4" y="' + (y + 4) + '" font-size="11" fill="' + col('--ink') + '">' + label + '</text>';
+      if (a2 != null) out += '<line x1="' + x(P(a2)) + '" x2="' + x(P(b2)) + '" y1="' + y + '" y2="' + y + '" stroke="' + c + '" stroke-width="2" opacity=".5"/>';
+      out += '<rect x="' + Math.min(x(P(a)), x(P(b))) + '" y="' + (y - 6) + '" width="' + Math.max(Math.abs(x(P(b)) - x(P(a))), 2) + '" height="12" rx="2" fill="' + c + '" opacity=".35"/>' +
+        '<rect x="' + (x(P(m)) - 1.5) + '" y="' + (y - 8) + '" width="3" height="16" fill="' + c + '"/>';
+    };
+    row(40, '最高', g.oh[0], g.oh[2], g.oh[1], col('--up'));
+    row(72, '最低', g.ol[0], g.ol[2], g.ol[1], col('--down'));
+    row(104, '收盤', g.oc[1], g.oc[3], g.oc[2], col('--accent'), g.oc[0], g.oc[4]);
+    sv.innerHTML = out;
+  }
+
+  function setTab(t) {
+    if (['calc', 'plan', 'info'].indexOf(t) < 0) t = 'calc';
+    state.tab = t; save();
+    document.querySelectorAll('.tabs [data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === t)); });
+    document.getElementById('tabCalc').hidden = t !== 'calc';
+    document.getElementById('tabPlan').hidden = t !== 'plan';
+    document.getElementById('tabInfo').hidden = t !== 'info';
+    if (t === 'info') { var m = MIN && state.code && MIN.codes && MIN.codes[state.code]; if (m) drawK(m); }
+    if (t === 'plan' && pbLast) drawPB.apply(null, pbLast);
+  }
+  document.querySelectorAll('.tabs [data-tab]').forEach(function (b) { b.addEventListener('click', function () { setTab(b.dataset.tab); }); });
+  setTab(state.tab);
+
+  document.getElementById('codeGo').addEventListener('click', function () { lookup(codeIn.value, true); });
+  codeIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); lookup(codeIn.value, true); } });
+  // 從候選清單點一檔 (值會變成「代號 名稱」) 就直接帶入
+  codeIn.addEventListener('input', function () {
+    var v = codeIn.value;
+    if (/\s/.test(v) && SNAP && SNAP.stocks && SNAP.stocks[v.split(/\s+/)[0].toUpperCase()]) lookup(v, true);
+  });
+  var redrawT;
+  function redraw() { clearTimeout(redrawT); redrawT = setTimeout(function () { var m = MIN && state.code && MIN.codes && MIN.codes[state.code]; if (m) drawK(m); if (pbLast) drawPB.apply(null, pbLast); }, 120); }
+  window.addEventListener('resize', redraw);
+  try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw); } catch (e) {}
+  try { new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] }); } catch (e) {}
+  if (state.code) { codeIn.value = state.code; lookup(state.code, false); }
+
+  renderLegs();
+  render();
+  if (state.quick.on) setQuick(true);
+})();
+</script>
+
